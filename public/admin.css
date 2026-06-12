@@ -358,6 +358,49 @@ input:focus, select:focus, textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.notice-comment-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.notice-comment-list > strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.notice-comment-list.empty-comments {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.notice-comment-row {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faf6;
+}
+
+.notice-comment-row div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notice-comment-row span,
+.notice-comment-row small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notice-comment-row p {
+  margin-top: 7px;
+  color: var(--ink);
+}
+
 .user-list, .product-list {
   display: grid;
   gap: 10px;

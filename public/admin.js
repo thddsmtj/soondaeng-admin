@@ -193,6 +193,7 @@ function renderNotices(notices = []) {
         <strong>${esc(notice.title || "공지")}</strong>
         <span>${formatTime(notice.updatedAt || notice.createdAt)} · 댓글 ${(notice.comments || []).length}개</span>
         <p>${esc(notice.body || "")}</p>
+        ${renderNoticeComments(notice.comments || [])}
       </div>
       <div class="row-actions">
         <button class="ghost" type="button" data-notice-id="${esc(notice.id)}" data-notice-action="edit">수정</button>
@@ -200,6 +201,26 @@ function renderNotices(notices = []) {
       </div>
     </article>
   `).join("") : emptyBlock("등록된 공지가 없습니다.");
+}
+
+function renderNoticeComments(comments = []) {
+  if (!comments.length) {
+    return `<div class="notice-comment-list empty-comments">댓글이 아직 없습니다.</div>`;
+  }
+  return `
+    <div class="notice-comment-list">
+      <strong>댓글 내역</strong>
+      ${comments.map((comment) => `
+        <div class="notice-comment-row">
+          <div>
+            <span>${esc(comment.storeName || comment.userEmail || comment.userPhone || "회원")}</span>
+            <small>${formatTime(comment.createdAt)}</small>
+          </div>
+          <p>${esc(comment.body || "")}</p>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 async function saveNotice(event) {
