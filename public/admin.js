@@ -203,7 +203,7 @@ function userActions(user, status) {
 
 function renderProduct(product) {
   const keyword = (product.keywords || [])[0] || {};
-  const items = (product.latestItems || []).slice(0, 10);
+  const items = (product.latestItems || []).slice(0, 50);
   return `
     <article class="product-row keyword-row-card">
       <div>
