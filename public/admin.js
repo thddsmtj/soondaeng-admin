@@ -296,7 +296,7 @@ async function deleteNoticeComment(noticeId, commentId) {
   if (!confirm("이 공지 댓글을 삭제할까요? 본사이트에서도 사라집니다.")) return;
   setBusy(true);
   try {
-    await adminApi(`/api/admin/notices/${encodeURIComponent(noticeId)}/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+    await adminApi(`/api/admin/notices/${encodeURIComponent(noticeId)}/comments/${encodeURIComponent(commentId)}/delete`, { method: "POST" });
     await loadOverview();
     toast("공지 댓글을 삭제했습니다.");
   } catch (error) {
