@@ -36,17 +36,29 @@
       <button id="trackAllButton" class="ghost" type="button"><svg><use href="#refresh"></use></svg><span>전체조회</span></button>
       <button id="downloadReportButton" class="ghost" type="button"><svg><use href="#download"></use></svg><span>엑셀</span></button>
       <button id="sendReportButton" class="primary" type="button"><svg><use href="#mail"></use></svg><span>메일 발송</span></button>
+      <button id="logoutButton" class="ghost" type="button">로그아웃</button>
     </section>
 
     <section class="kpis">
-      <article><span>회원</span><strong id="kpiUsers">0</strong></article>
-      <article><span>승인대기</span><strong id="kpiPending">0</strong></article>
-      <article><span>상품</span><strong id="kpiProducts">0</strong></article>
-      <article><span>키워드</span><strong id="kpiKeywords">0</strong></article>
-      <article><span>최근조회</span><strong id="kpiChecked">-</strong></article>
+      <article data-scroll-target="usersPanel" role="button" tabindex="0"><span>회원</span><strong id="kpiUsers">0</strong></article>
+      <article data-scroll-target="usersPanel" role="button" tabindex="0"><span>승인대기</span><strong id="kpiPending">0</strong></article>
+      <article data-scroll-target="productsPanel" role="button" tabindex="0"><span>키워드</span><strong id="kpiProducts">0</strong></article>
+      <article data-scroll-target="productsPanel" role="button" tabindex="0"><span>수집상품</span><strong id="kpiKeywords">0</strong></article>
+      <article data-scroll-target="apiPanel" role="button" tabindex="0"><span>오늘 API</span><strong id="kpiApiToday">0</strong></article>
+      <article data-scroll-target="apiPanel" role="button" tabindex="0"><span>최근조회</span><strong id="kpiChecked">-</strong></article>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="apiPanel">
+      <div class="panel-head">
+        <div>
+          <h2>API 호출 현황</h2>
+          <p>네이버 쇼핑 검색 API 사용량입니다.</p>
+        </div>
+      </div>
+      <div id="apiUsagePanel" class="api-usage-panel"></div>
+    </section>
+
+    <section class="panel" id="usersPanel">
       <div class="panel-head">
         <div>
           <h2>회원 승인</h2>
@@ -56,11 +68,11 @@
       <div id="userList" class="user-list"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="productsPanel">
       <div class="panel-head">
         <div>
-          <h2>전체 상품·키워드</h2>
-          <p>순댕이에 새로 등록된 추적 대상입니다.</p>
+          <h2>전체 키워드</h2>
+          <p>키워드별 최신 1~50위 수집 결과입니다.</p>
         </div>
       </div>
       <div id="productList" class="product-list"></div>

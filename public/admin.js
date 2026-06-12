@@ -12,12 +12,15 @@ const el = {
   trackAllButton: document.getElementById("trackAllButton"),
   downloadReportButton: document.getElementById("downloadReportButton"),
   sendReportButton: document.getElementById("sendReportButton"),
+  logoutButton: document.getElementById("logoutButton"),
   userList: document.getElementById("userList"),
   productList: document.getElementById("productList"),
+  apiUsagePanel: document.getElementById("apiUsagePanel"),
   kpiUsers: document.getElementById("kpiUsers"),
   kpiPending: document.getElementById("kpiPending"),
   kpiProducts: document.getElementById("kpiProducts"),
   kpiKeywords: document.getElementById("kpiKeywords"),
+  kpiApiToday: document.getElementById("kpiApiToday"),
   kpiChecked: document.getElementById("kpiChecked"),
   toast: document.getElementById("toast")
 };
@@ -42,10 +45,25 @@ function bindEvents() {
   el.trackAllButton.addEventListener("click", trackAll);
   el.downloadReportButton.addEventListener("click", downloadReport);
   el.sendReportButton.addEventListener("click", sendReport);
+  el.logoutButton?.addEventListener("click", logoutAdmin);
+  document.querySelectorAll("[data-scroll-target]").forEach((item) => {
+    item.addEventListener("click", () => scrollToPanel(item.dataset.scrollTarget));
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        scrollToPanel(item.dataset.scrollTarget);
+      }
+    });
+  });
   el.userList.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-user-action]");
     if (!button) return;
-    await updateUserApproval(button.dataset.userId, button.dataset.userAction);
+    const action = button.dataset.userAction;
+    if (action === "force-delete" || action === "permanent-delete") {
+      await deleteUser(button.dataset.userId, action);
+      return;
+    }
+    await updateUserApproval(button.dataset.userId, action);
   });
 }
 
@@ -68,9 +86,7 @@ async function loadOverview(options = {}) {
   } catch (error) {
     const secretError = /ADMIN_SECRET|비밀키|일치하지|맞지/.test(error.message);
     state.connected = wasConnected && !secretError;
-    if (secretError) {
-      localStorage.removeItem("soondaeng_admin_secret");
-    }
+    if (secretError) localStorage.removeItem("soondaeng_admin_secret");
     renderConnectionState(error.message);
     toast(error.message);
   } finally {
@@ -84,37 +100,79 @@ function render() {
   const users = overview.users || [];
   const products = overview.products || [];
   const pendingCount = users.filter((user) => approvalStatus(user) === "pending").length;
+  const usage = summary.apiUsage || {};
 
-  el.kpiUsers.textContent = summary.userCount || users.length || 0;
-  el.kpiPending.textContent = pendingCount;
-  el.kpiProducts.textContent = summary.productCount || products.length || 0;
-  el.kpiKeywords.textContent = summary.keywordCount || 0;
+  el.kpiUsers.textContent = formatNumber(summary.userCount || users.length || 0);
+  el.kpiPending.textContent = formatNumber(pendingCount);
+  el.kpiProducts.textContent = formatNumber(summary.keywordCount || products.length || 0);
+  el.kpiKeywords.textContent = formatNumber(summary.collectedItemCount || 0);
+  el.kpiApiToday.textContent = formatNumber(usage.todayCount || 0);
   el.kpiChecked.textContent = summary.lastCheckedAt ? formatTime(summary.lastCheckedAt) : "-";
 
+  renderApiUsage(summary);
   el.userList.innerHTML = users.length ? users.map(renderUser).join("") : emptyBlock("회원이 없습니다.");
-  el.productList.innerHTML = products.length ? products.map(renderProduct).join("") : emptyBlock("등록된 상품이 없습니다.");
+  el.productList.innerHTML = products.length ? products.map(renderProduct).join("") : emptyBlock("등록된 키워드가 없습니다.");
+}
+
+function renderApiUsage(summary) {
+  const usage = summary.apiUsage || {};
+  const usageByUser = summary.usageByUser || [];
+  const recentDays = usage.recentDays || [];
+  el.apiUsagePanel.innerHTML = `
+    <div class="api-cards">
+      <article><span>오늘 호출</span><strong>${formatNumber(usage.todayCount || 0)}</strong></article>
+      <article><span>잔여 추정</span><strong>${formatNumber(usage.remainingToday ?? 25000)}</strong></article>
+      <article><span>누적 호출</span><strong>${formatNumber(usage.total || 0)}</strong></article>
+      <article><span>일일 기준</span><strong>${formatNumber(usage.limit || 25000)}</strong></article>
+    </div>
+    <div class="api-detail-grid">
+      <div>
+        <h3>최근 7일</h3>
+        <div class="usage-list">
+          ${recentDays.length ? recentDays.map((day) => `<div><span>${esc(day.day)}</span><strong>${formatNumber(day.count)}</strong></div>`).join("") : `<div><span>기록 없음</span><strong>0</strong></div>`}
+        </div>
+      </div>
+      <div>
+        <h3>회원별 호출</h3>
+        <div class="usage-list">
+          ${usageByUser.length ? usageByUser.map((user) => `
+            <div>
+              <span>${esc(user.email || user.phone || "-")}</span>
+              <strong>오늘 ${formatNumber(user.todayApiCalls || 0)} / 누적 ${formatNumber(user.totalApiCalls || 0)}</strong>
+            </div>
+          `).join("") : `<div><span>기록 없음</span><strong>0</strong></div>`}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderUser(user) {
   const status = approvalStatus(user);
-  const badge = {
-    pending: "승인대기",
-    approved: "승인완료",
-    rejected: "거절"
-  }[status] || status;
-  const actions = userActions(user, status);
+  const badge = { pending: "승인대기", approved: "승인완료", rejected: "거절" }[status] || status;
   return `
     <article class="user-row ${esc(status)}">
       <div>
         <strong>${esc(user.email || "-")}</strong>
         <span>${esc(user.phone || "")} · ${esc(user.storeName || "스토어명 없음")}</span>
+        <details class="detail-box">
+          <summary>상세보기</summary>
+          <div class="detail-grid">
+            <span>가입: ${formatTime(user.createdAt)}</span>
+            <span>승인요청: ${formatTime(user.approvalRequestedAt)}</span>
+            <span>키워드: ${formatNumber(user.productCount || 0)} / 한도 ${formatNumber(user.productLimit || 100)}</span>
+            <span>오늘 API: ${formatNumber(user.todayApiCalls || 0)}</span>
+            <span>누적 API: ${formatNumber(user.totalApiCalls || 0)}</span>
+            <span>최근조회: ${formatTime(user.lastCheckedAt)}</span>
+          </div>
+        </details>
       </div>
       <div class="user-meta">
         <span class="status ${esc(status)}">${esc(badge)}</span>
-        <small>상품 ${user.productCount || 0} · 키워드 ${user.keywordCount || 0}</small>
+        <small>키워드 ${user.productCount || 0} · 수집 ${user.keywordCount || 0}</small>
       </div>
       <div class="row-actions">
-        ${actions}
+        ${userActions(user, status)}
       </div>
     </article>
   `;
@@ -122,36 +180,58 @@ function renderUser(user) {
 
 function userActions(user, status) {
   const id = esc(user.id);
-  if (status === "approved") {
-    return `
+  const approvalButtons = status === "approved"
+    ? `
       <button class="danger" type="button" data-user-id="${id}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
-      <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기로 변경</button>
-    `;
-  }
-  if (status === "rejected") {
-    return `
-      <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
-      <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기로 변경</button>
-    `;
-  }
+      <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기</button>
+    `
+    : status === "rejected"
+      ? `
+        <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
+        <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기</button>
+      `
+      : `
+        <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
+        <button class="danger" type="button" data-user-id="${id}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
+      `;
   return `
-    <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
-    <button class="danger" type="button" data-user-id="${id}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
+    ${approvalButtons}
+    <button class="danger" type="button" data-user-id="${id}" data-user-action="force-delete">회원삭제</button>
+    <button class="danger strong-danger" type="button" data-user-id="${id}" data-user-action="permanent-delete">완전삭제</button>
   `;
 }
 
 function renderProduct(product) {
+  const keyword = (product.keywords || [])[0] || {};
+  const items = (product.latestItems || []).slice(0, 10);
   return `
-    <article class="product-row">
+    <article class="product-row keyword-row-card">
       <div>
-        <strong>${esc(product.name || "상품 확인중")}</strong>
-        <span>${esc(product.userEmail || "")} · ${esc(product.store || product.userStoreName || "")}</span>
-        <a href="${esc(product.url || "")}" target="_blank" rel="noreferrer">${esc(product.url || "")}</a>
+        <strong>${esc(product.term || product.name || keyword.term || "키워드")}</strong>
+        <span>${esc(product.userEmail || "")} · ${esc(product.userPhone || "")}</span>
+        <span>기준 ${(keyword.alertRanks || product.alertRanks || [15]).join(", ")}위 · 하락폭 ${keyword.dropThreshold || product.dropThreshold || 10}위 · 최신 ${product.resultCount || items.length || 0}개</span>
+        <details class="detail-box">
+          <summary>상세보기</summary>
+          <div class="rank-table-wrap">
+            <table class="rank-table">
+              <thead><tr><th>순위</th><th>상품</th><th>스토어</th></tr></thead>
+              <tbody>
+                ${items.length ? items.map((item) => `
+                  <tr>
+                    <td>${item.rank || "-"}</td>
+                    <td><a href="${esc(item.link || "")}" target="_blank" rel="noreferrer">${esc(item.title || "-")}</a></td>
+                    <td>${esc(item.mallName || "-")}</td>
+                  </tr>
+                `).join("") : `<tr><td colspan="3">아직 수집 결과가 없습니다.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
       <div class="keyword-stack">
-        ${(product.keywords || []).map((keyword) => `
-          <span>${esc(keyword.term)} · ${keyword.rank ? `${keyword.rank}위` : "50위 밖"} · 기준 ${(keyword.alertRanks || [10]).join(", ")} · 하락 ${keyword.dropThreshold || 15}</span>
-        `).join("")}
+        <span>최근조회 ${formatTime(product.lastCheckedAt)}</span>
+        <span>상태 ${esc(keyword.status || "pending")} ${keyword.lastError ? `· ${esc(keyword.lastError)}` : ""}</span>
+        <span>API ${formatNumber(keyword.lastApiCalls || 0)}회</span>
       </div>
     </article>
   `;
@@ -182,12 +262,32 @@ async function updateUserApproval(userId, status) {
   }
 }
 
+async function deleteUser(userId, action) {
+  const user = (state.overview?.users || []).find((item) => item.id === userId);
+  if (!user) return;
+  const permanent = action === "permanent-delete";
+  const message = permanent
+    ? `${user.email || user.phone || "회원"}을 완전삭제할까요? 회원, 키워드, 저장 순위가 모두 삭제됩니다.`
+    : `${user.email || user.phone || "회원"}을 삭제 처리할까요? 키워드는 비활성화되고 기록은 보관됩니다.`;
+  if (!confirm(message)) return;
+  setBusy(true);
+  try {
+    await adminApi(`/api/admin/users/${encodeURIComponent(userId)}/${action}`, { method: "POST" });
+    await loadOverview();
+    toast(permanent ? "회원을 완전삭제했습니다." : "회원을 삭제 처리했습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function trackAll() {
   setBusy(true);
   try {
-    await adminApi("/api/admin/track-all", { method: "POST" });
+    await adminApi("/api/admin/track-all", { method: "POST", timeoutMs: 180000 });
     await loadOverview();
-    toast("전체 순위 조회를 실행했습니다.");
+    toast("전체 키워드 순위 수집을 실행했습니다.");
   } catch (error) {
     toast(error.message);
   } finally {
@@ -213,6 +313,15 @@ async function sendReport() {
   } finally {
     setBusy(false);
   }
+}
+
+function logoutAdmin() {
+  state.secret = "";
+  state.overview = null;
+  state.connected = false;
+  el.secretInput.value = "";
+  localStorage.removeItem("soondaeng_admin_secret");
+  renderConnectionState("로그아웃했습니다. 관리자 비밀키를 다시 입력해 주세요.");
 }
 
 async function adminApi(path, options = {}) {
@@ -289,6 +398,10 @@ function ensureConnectionMessage() {
   return message;
 }
 
+function scrollToPanel(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function fetchWithTimeout(path, init, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -332,11 +445,16 @@ function toast(message) {
 }
 
 function formatTime(timestamp) {
+  if (!timestamp) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
     dateStyle: "short",
     timeStyle: "short",
     timeZone: "Asia/Seoul"
   }).format(new Date(timestamp));
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("ko-KR").format(Number(value || 0));
 }
 
 function esc(value) {
