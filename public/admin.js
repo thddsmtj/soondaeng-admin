@@ -56,6 +56,11 @@ function bindEvents() {
   el.noticeForm?.addEventListener("submit", saveNotice);
   el.cancelNoticeEdit?.addEventListener("click", resetNoticeForm);
   el.noticeList?.addEventListener("click", async (event) => {
+    const commentButton = event.target.closest("[data-notice-comment-action]");
+    if (commentButton?.dataset.noticeCommentAction === "delete") {
+      await deleteNoticeComment(commentButton.dataset.noticeId, commentButton.dataset.commentId);
+      return;
+    }
     const button = event.target.closest("[data-notice-action]");
     if (!button) return;
     const noticeId = button.dataset.noticeId;
@@ -193,7 +198,7 @@ function renderNotices(notices = []) {
         <strong>${esc(notice.title || "공지")}</strong>
         <span>${formatTime(notice.updatedAt || notice.createdAt)} · 댓글 ${(notice.comments || []).length}개</span>
         <p>${esc(notice.body || "")}</p>
-        ${renderNoticeComments(notice.comments || [])}
+        ${renderNoticeComments(notice.id, notice.comments || [])}
       </div>
       <div class="row-actions">
         <button class="ghost" type="button" data-notice-id="${esc(notice.id)}" data-notice-action="edit">수정</button>
@@ -203,7 +208,7 @@ function renderNotices(notices = []) {
   `).join("") : emptyBlock("등록된 공지가 없습니다.");
 }
 
-function renderNoticeComments(comments = []) {
+function renderNoticeComments(noticeId, comments = []) {
   if (!comments.length) {
     return `<div class="notice-comment-list empty-comments">댓글이 아직 없습니다.</div>`;
   }
@@ -215,6 +220,7 @@ function renderNoticeComments(comments = []) {
           <div>
             <span>${esc(comment.storeName || comment.userEmail || comment.userPhone || "회원")}</span>
             <small>${formatTime(comment.createdAt)}</small>
+            <button class="danger mini-danger" type="button" data-notice-id="${esc(noticeId)}" data-comment-id="${esc(comment.id)}" data-notice-comment-action="delete">댓글 삭제</button>
           </div>
           <p>${esc(comment.body || "")}</p>
         </div>
@@ -276,6 +282,23 @@ async function deleteNotice(noticeId) {
     resetNoticeForm();
     await loadOverview();
     toast("공지를 삭제했습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteNoticeComment(noticeId, commentId) {
+  const notice = (state.overview?.notices || state.overview?.summary?.notices || []).find((item) => item.id === noticeId);
+  const comment = (notice?.comments || []).find((item) => item.id === commentId);
+  if (!notice || !comment) return;
+  if (!confirm("이 공지 댓글을 삭제할까요? 본사이트에서도 사라집니다.")) return;
+  setBusy(true);
+  try {
+    await adminApi(`/api/admin/notices/${encodeURIComponent(noticeId)}/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+    await loadOverview();
+    toast("공지 댓글을 삭제했습니다.");
   } catch (error) {
     toast(error.message);
   } finally {

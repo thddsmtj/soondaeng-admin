@@ -385,6 +385,8 @@ input:focus, select:focus, textarea:focus {
 
 .notice-comment-row div {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
@@ -399,6 +401,12 @@ input:focus, select:focus, textarea:focus {
 .notice-comment-row p {
   margin-top: 7px;
   color: var(--ink);
+}
+
+.mini-danger {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
 }
 
 .user-list, .product-list {

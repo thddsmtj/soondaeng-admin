@@ -137,6 +137,7 @@ function isAllowedAdminPath(pathname) {
   if (pathname === "/api/admin/reports/send") return true;
   if (pathname === "/api/admin/notices") return true;
   if (/^\/api\/admin\/notices\/[^/]+$/.test(pathname)) return true;
+  if (/^\/api\/admin\/notices\/[^/]+\/comments\/[^/]+$/.test(pathname)) return true;
   if (/^\/api\/admin\/users\/[^/]+\/settings$/.test(pathname)) return true;
   if (/^\/api\/admin\/users\/[^/]+\/(?:force-delete|permanent-delete)$/.test(pathname)) return true;
   return false;
