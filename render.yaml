@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: soondaeng-admin
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: MAIN_APP_URL
+        value: https://soondaeng-live.onrender.com
