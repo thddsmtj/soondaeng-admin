@@ -12,7 +12,7 @@ loadEnvFile(path.join(__dirname, ".env"));
 const PORT = Number(process.env.PORT || 3001);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAIN_APP_URL = trimTrailingSlash(process.env.MAIN_APP_URL || "https://soondaeng-live.onrender.com");
-const MAIN_APP_TIMEOUT_MS = Number(process.env.MAIN_APP_TIMEOUT_MS || 90000);
+const MAIN_APP_TIMEOUT_MS = Number(process.env.MAIN_APP_TIMEOUT_MS || 120000);
 const MAIN_APP_RETRY_COUNT = clamp(Number(process.env.MAIN_APP_RETRY_COUNT || 3), 1, 5);
 
 const mimeTypes = {
@@ -89,9 +89,18 @@ async function proxyAdminApi(req, res, requestUrl) {
     return;
   }
 
+  const contentType = response.headers.get("content-type") || "";
   const responseBody = Buffer.from(await response.arrayBuffer());
+  if (contentType.includes("text/html")) {
+    sendJson(res, 502, {
+      error: "MAIN_APP_URL_INVALID",
+      message: `본사이트 API 대신 HTML 페이지가 응답했습니다. 관리자사이트 Render 환경변수 MAIN_APP_URL을 https://soondaeng-live.onrender.com 로 설정했는지 확인해 주세요. 현재 대상: ${MAIN_APP_URL}`
+    });
+    return;
+  }
+
   res.writeHead(response.status, {
-    "Content-Type": response.headers.get("content-type") || "application/json; charset=utf-8",
+    "Content-Type": contentType || "application/json; charset=utf-8",
     "Content-Length": responseBody.length,
     "Cache-Control": "no-store"
   });

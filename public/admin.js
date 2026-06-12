@@ -117,7 +117,7 @@ async function loadOverview(options = {}) {
   setBusy(true);
   renderConnectionState(options.auto ? "저장된 비밀키로 연결 확인 중입니다." : "관리자 비밀키를 확인하고 있습니다.");
   try {
-    state.overview = await adminApi("/api/admin/overview", { retries: 3, timeoutMs: 65000 });
+    state.overview = await adminApi("/api/admin/overview", { retries: 1, timeoutMs: 130000 });
     state.connected = true;
     localStorage.setItem("soondaeng_admin_secret", state.secret);
     render();
@@ -556,7 +556,7 @@ async function adminApi(path, options = {}) {
         await sleep(700 * (attempt + 1));
         continue;
       }
-      throw new Error("본사이트 서버 연결이 잠시 불안정합니다. Render 배포 또는 절전 해제 중일 수 있으니 20~30초 뒤 다시 시도해 주세요.");
+      throw new Error("본사이트 서버가 깨어나는 중입니다. Render 무료 서버는 처음 접속 때 1~2분 걸릴 수 있으니 새로고침을 반복하지 말고 한 번 더 연결을 눌러 주세요.");
     }
 
     const contentType = response.headers.get("content-type") || "";
@@ -580,7 +580,7 @@ function readableAdminError(response, body) {
     return "관리자 API 경로를 찾지 못했습니다. 본사이트 배포가 끝났는지 확인한 뒤 Ctrl+F5로 새로고침해 주세요.";
   }
   if (response.status === 502 || response.status === 503 || response.status === 504) {
-    return message || "본사이트 서버가 잠시 깨어나는 중입니다. 20~30초 뒤 다시 눌러 주세요.";
+    return message || "본사이트 서버가 깨어나는 중입니다. Render 무료 서버는 처음 접속 때 1~2분 걸릴 수 있습니다.";
   }
   return message || `관리자 요청 중 오류가 발생했습니다. (${response.status})`;
 }
