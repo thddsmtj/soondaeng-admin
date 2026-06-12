@@ -13,6 +13,7 @@ const PORT = Number(process.env.PORT || 3001);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MAIN_APP_URL = trimTrailingSlash(process.env.MAIN_APP_URL || "https://soondaeng-live.onrender.com");
 const MAIN_APP_TIMEOUT_MS = Number(process.env.MAIN_APP_TIMEOUT_MS || 90000);
+const MAIN_APP_RETRY_COUNT = clamp(Number(process.env.MAIN_APP_RETRY_COUNT || 3), 1, 5);
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -70,15 +71,12 @@ async function proxyAdminApi(req, res, requestUrl) {
   if (requestBody !== undefined) headers["Content-Type"] = req.headers["content-type"] || "application/json";
 
   let response;
-  let timeout = null;
   try {
-    const controller = new AbortController();
-    timeout = setTimeout(() => controller.abort(), MAIN_APP_TIMEOUT_MS);
-    response = await fetch(target, {
+    response = await fetchMainApp(target, {
       method: req.method,
       headers,
       body: requestBody,
-      signal: controller.signal
+      retries: req.method === "GET" ? MAIN_APP_RETRY_COUNT : 1
     });
   } catch (error) {
     console.error("Main app proxy failed:", error);
@@ -89,8 +87,6 @@ async function proxyAdminApi(req, res, requestUrl) {
         : `본사이트에 연결하지 못했습니다. 관리자사이트 Render의 MAIN_APP_URL 값을 확인해 주세요. 현재 대상: ${MAIN_APP_URL}`
     });
     return;
-  } finally {
-    if (timeout) clearTimeout(timeout);
   }
 
   const responseBody = Buffer.from(await response.arrayBuffer());
@@ -100,6 +96,36 @@ async function proxyAdminApi(req, res, requestUrl) {
     "Cache-Control": "no-store"
   });
   res.end(responseBody);
+}
+
+async function fetchMainApp(target, options) {
+  const attempts = options.retries || 1;
+  let lastResponse = null;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MAIN_APP_TIMEOUT_MS);
+    try {
+      const response = await fetch(target, {
+        method: options.method,
+        headers: options.headers,
+        body: options.body,
+        signal: controller.signal
+      });
+      if (!isTransientStatus(response.status) || attempt === attempts) return response;
+      lastResponse = response;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+    } finally {
+      clearTimeout(timeout);
+    }
+    await sleep(650 * attempt);
+  }
+
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error("Main app request failed");
 }
 
 function isAllowedAdminPath(pathname) {
@@ -129,6 +155,12 @@ async function readRequestBody(req) {
 
 async function serveStatic(res, requestUrl) {
   const rawPath = decodeURIComponent(requestUrl.pathname);
+  if (rawPath === "/favicon.ico") {
+    res.writeHead(204, { "Cache-Control": "public, max-age=86400" });
+    res.end();
+    return;
+  }
+
   const cleanPath = rawPath === "/" ? "/index.html" : rawPath;
   const filePath = path.normalize(path.join(PUBLIC_DIR, cleanPath));
 
@@ -149,6 +181,17 @@ async function serveStatic(res, requestUrl) {
     });
     res.end(body);
   } catch {
+    if (!path.extname(filePath)) {
+      const fallback = path.join(PUBLIC_DIR, "index.html");
+      const body = readFileSync(fallback);
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Length": body.length,
+        "Cache-Control": "no-store"
+      });
+      res.end(body);
+      return;
+    }
     sendText(res, 404, "Not found");
   }
 }
@@ -189,6 +232,19 @@ function sendText(res, statusCode, body) {
     "Content-Length": Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+function isTransientStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clamp(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
 }
 
 function trimTrailingSlash(value) {

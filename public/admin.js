@@ -1,7 +1,8 @@
 const state = {
   secret: localStorage.getItem("soondaeng_admin_secret") || "",
   overview: null,
-  busy: false
+  busy: false,
+  connected: false
 };
 
 const el = {
@@ -26,14 +27,15 @@ init();
 function init() {
   el.secretInput.value = state.secret;
   bindEvents();
-  if (state.secret) loadOverview();
+  ensureConnectionMessage();
+  renderConnectionState();
+  if (state.secret) loadOverview({ auto: true });
 }
 
 function bindEvents() {
   el.secretForm.addEventListener("submit", (event) => {
     event.preventDefault();
     state.secret = el.secretInput.value.trim();
-    localStorage.setItem("soondaeng_admin_secret", state.secret);
     loadOverview();
   });
   el.refreshButton.addEventListener("click", loadOverview);
@@ -47,17 +49,29 @@ function bindEvents() {
   });
 }
 
-async function loadOverview() {
+async function loadOverview(options = {}) {
   if (!state.secret) {
-    toast("ADMIN_SECRET을 입력해 주세요.");
+    state.connected = false;
+    renderConnectionState("ADMIN_SECRET을 입력해 주세요.");
     return;
   }
+  const wasConnected = state.connected;
   setBusy(true);
+  renderConnectionState(options.auto ? "저장된 비밀키로 연결 확인 중입니다." : "관리자 비밀키를 확인하고 있습니다.");
   try {
-    state.overview = await adminApi("/api/admin/overview");
+    state.overview = await adminApi("/api/admin/overview", { retries: 3, timeoutMs: 65000 });
+    state.connected = true;
+    localStorage.setItem("soondaeng_admin_secret", state.secret);
     render();
-    toast("관리자 데이터가 갱신되었습니다.");
+    renderConnectionState();
+    toast("관리자 화면에 연결됐습니다.");
   } catch (error) {
+    const secretError = /ADMIN_SECRET|비밀키|일치하지|맞지/.test(error.message);
+    state.connected = wasConnected && !secretError;
+    if (secretError) {
+      localStorage.removeItem("soondaeng_admin_secret");
+    }
+    renderConnectionState(error.message);
     toast(error.message);
   } finally {
     setBusy(false);
@@ -88,6 +102,7 @@ function renderUser(user) {
     approved: "승인완료",
     rejected: "거절"
   }[status] || status;
+  const actions = userActions(user, status);
   return `
     <article class="user-row ${esc(status)}">
       <div>
@@ -99,11 +114,29 @@ function renderUser(user) {
         <small>상품 ${user.productCount || 0} · 키워드 ${user.keywordCount || 0}</small>
       </div>
       <div class="row-actions">
-        <button class="primary" type="button" data-user-id="${esc(user.id)}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
-        <button class="danger" type="button" data-user-id="${esc(user.id)}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
-        <button class="ghost" type="button" data-user-id="${esc(user.id)}" data-user-action="pending">대기</button>
+        ${actions}
       </div>
     </article>
+  `;
+}
+
+function userActions(user, status) {
+  const id = esc(user.id);
+  if (status === "approved") {
+    return `
+      <button class="danger" type="button" data-user-id="${id}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
+      <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기로 변경</button>
+    `;
+  }
+  if (status === "rejected") {
+    return `
+      <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
+      <button class="ghost" type="button" data-user-id="${id}" data-user-action="pending">대기로 변경</button>
+    `;
+  }
+  return `
+    <button class="primary" type="button" data-user-id="${id}" data-user-action="approved"><svg><use href="#check"></use></svg><span>승인</span></button>
+    <button class="danger" type="button" data-user-id="${id}" data-user-action="rejected"><svg><use href="#close"></use></svg><span>거절</span></button>
   `;
 }
 
@@ -183,8 +216,9 @@ async function sendReport() {
 }
 
 async function adminApi(path, options = {}) {
+  const method = options.method || "GET";
   const init = {
-    method: options.method || "GET",
+    method,
     headers: {
       Accept: "application/json",
       "X-Admin-Secret": state.secret
@@ -194,13 +228,83 @@ async function adminApi(path, options = {}) {
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body);
   }
-  const response = await fetch(path, init);
-  const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) {
-    throw new Error(body?.message || body?.error || "관리자 요청 중 오류가 발생했습니다.");
+
+  const retries = Number.isInteger(options.retries) ? options.retries : (method === "GET" ? 2 : 0);
+  const timeoutMs = options.timeoutMs || 45000;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    let response;
+    try {
+      response = await fetchWithTimeout(path, init, timeoutMs);
+    } catch {
+      if (attempt < retries) {
+        await sleep(700 * (attempt + 1));
+        continue;
+      }
+      throw new Error("본사이트 서버 연결이 잠시 불안정합니다. Render 배포 또는 절전 해제 중일 수 있으니 20~30초 뒤 다시 시도해 주세요.");
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const body = contentType.includes("application/json") ? await response.json().catch(() => ({})) : await response.text().catch(() => "");
+    if (response.ok) return body;
+    if (isRetryableStatus(response.status) && attempt < retries) {
+      await sleep(800 * (attempt + 1));
+      continue;
+    }
+    throw new Error(readableAdminError(response, body));
   }
-  return body;
+
+  throw new Error("관리자 요청 중 오류가 발생했습니다.");
+}
+
+function readableAdminError(response, body) {
+  const rawMessage = typeof body === "string" ? body : body?.message || body?.error || "";
+  const message = String(rawMessage || "").trim();
+  if (response.status === 401) return message || "ADMIN_SECRET이 맞지 않습니다. Render 본사이트 환경변수와 같은 값을 입력해 주세요.";
+  if (response.status === 404 || /not\s*found/i.test(message)) {
+    return "관리자 API 경로를 찾지 못했습니다. 본사이트 배포가 끝났는지 확인한 뒤 Ctrl+F5로 새로고침해 주세요.";
+  }
+  if (response.status === 502 || response.status === 503 || response.status === 504) {
+    return message || "본사이트 서버가 잠시 깨어나는 중입니다. 20~30초 뒤 다시 눌러 주세요.";
+  }
+  return message || `관리자 요청 중 오류가 발생했습니다. (${response.status})`;
+}
+
+function renderConnectionState(message = "") {
+  document.body.classList.toggle("admin-locked", !state.connected);
+  document.body.classList.toggle("admin-connected", state.connected);
+  const connectionMessage = ensureConnectionMessage();
+  connectionMessage.textContent = message || (state.connected ? "" : "관리자 비밀키를 입력하면 화면이 열립니다.");
+  connectionMessage.hidden = state.connected && !message;
+}
+
+function ensureConnectionMessage() {
+  let message = document.getElementById("connectionMessage");
+  if (!message) {
+    message = document.createElement("p");
+    message.id = "connectionMessage";
+    message.className = "connection-message";
+    el.secretForm.appendChild(message);
+  }
+  return message;
+}
+
+async function fetchWithTimeout(path, init, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(path, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isRetryableStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function approvalStatus(user) {
@@ -224,7 +328,7 @@ function toast(message) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => {
     el.toast.hidden = true;
-  }, 2600);
+  }, 5600);
 }
 
 function formatTime(timestamp) {
