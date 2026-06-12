@@ -46,6 +46,7 @@
       <article data-scroll-target="productsPanel" role="button" tabindex="0"><span>수집상품</span><strong id="kpiKeywords">0</strong></article>
       <article data-scroll-target="apiPanel" role="button" tabindex="0"><span>오늘 API</span><strong id="kpiApiToday">0</strong></article>
       <article data-scroll-target="apiPanel" role="button" tabindex="0"><span>최근조회</span><strong id="kpiChecked">-</strong></article>
+      <article data-scroll-target="noticesPanel" role="button" tabindex="0"><span>공지</span><strong id="kpiNotices">0</strong></article>
     </section>
 
     <section class="panel" id="apiPanel">
@@ -56,6 +57,31 @@
         </div>
       </div>
       <div id="apiUsagePanel" class="api-usage-panel"></div>
+    </section>
+
+    <section class="panel" id="noticesPanel">
+      <div class="panel-head">
+        <div>
+          <h2>공지사항 관리</h2>
+          <p>본사이트 회원에게 보이는 공지를 작성, 수정, 삭제합니다.</p>
+        </div>
+      </div>
+      <form id="noticeForm" class="notice-form">
+        <input type="hidden" id="noticeId">
+        <label>
+          공지 제목
+          <input id="noticeTitle" maxlength="120" placeholder="예: 순위 수집 안내" required>
+        </label>
+        <label>
+          공지 내용
+          <textarea id="noticeBody" maxlength="5000" placeholder="회원에게 안내할 내용을 입력하세요." required></textarea>
+        </label>
+        <div class="notice-form-actions">
+          <button class="primary" id="saveNoticeButton" type="submit">공지 저장</button>
+          <button class="ghost" id="cancelNoticeEdit" type="button" hidden>수정 취소</button>
+        </div>
+      </form>
+      <div id="noticeList" class="notice-list"></div>
     </section>
 
     <section class="panel" id="usersPanel">

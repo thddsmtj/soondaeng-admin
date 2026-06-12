@@ -16,12 +16,19 @@ const el = {
   userList: document.getElementById("userList"),
   productList: document.getElementById("productList"),
   apiUsagePanel: document.getElementById("apiUsagePanel"),
+  noticeForm: document.getElementById("noticeForm"),
+  noticeId: document.getElementById("noticeId"),
+  noticeTitle: document.getElementById("noticeTitle"),
+  noticeBody: document.getElementById("noticeBody"),
+  noticeList: document.getElementById("noticeList"),
+  cancelNoticeEdit: document.getElementById("cancelNoticeEdit"),
   kpiUsers: document.getElementById("kpiUsers"),
   kpiPending: document.getElementById("kpiPending"),
   kpiProducts: document.getElementById("kpiProducts"),
   kpiKeywords: document.getElementById("kpiKeywords"),
   kpiApiToday: document.getElementById("kpiApiToday"),
   kpiChecked: document.getElementById("kpiChecked"),
+  kpiNotices: document.getElementById("kpiNotices"),
   toast: document.getElementById("toast")
 };
 
@@ -46,6 +53,20 @@ function bindEvents() {
   el.downloadReportButton.addEventListener("click", downloadReport);
   el.sendReportButton.addEventListener("click", sendReport);
   el.logoutButton?.addEventListener("click", logoutAdmin);
+  el.noticeForm?.addEventListener("submit", saveNotice);
+  el.cancelNoticeEdit?.addEventListener("click", resetNoticeForm);
+  el.noticeList?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-notice-action]");
+    if (!button) return;
+    const noticeId = button.dataset.noticeId;
+    if (button.dataset.noticeAction === "edit") {
+      editNotice(noticeId);
+      return;
+    }
+    if (button.dataset.noticeAction === "delete") {
+      await deleteNotice(noticeId);
+    }
+  });
   document.querySelectorAll("[data-scroll-target]").forEach((item) => {
     item.addEventListener("click", () => scrollToPanel(item.dataset.scrollTarget));
     item.addEventListener("keydown", (event) => {
@@ -113,6 +134,7 @@ function render() {
   const summary = overview.summary || {};
   const users = overview.users || [];
   const products = overview.products || [];
+  const notices = overview.notices || summary.notices || [];
   const pendingCount = users.filter((user) => approvalStatus(user) === "pending").length;
   const usage = summary.apiUsage || {};
 
@@ -122,8 +144,10 @@ function render() {
   el.kpiKeywords.textContent = formatNumber(summary.collectedItemCount || 0);
   el.kpiApiToday.textContent = formatNumber(usage.todayCount || 0);
   el.kpiChecked.textContent = summary.lastCheckedAt ? formatTime(summary.lastCheckedAt) : "-";
+  if (el.kpiNotices) el.kpiNotices.textContent = formatNumber(notices.length || 0);
 
   renderApiUsage(summary);
+  renderNotices(notices);
   el.userList.innerHTML = users.length ? users.map(renderUser).join("") : emptyBlock("회원이 없습니다.");
   el.productList.innerHTML = products.length ? products.map(renderProduct).join("") : emptyBlock("등록된 키워드가 없습니다.");
 }
@@ -159,6 +183,83 @@ function renderApiUsage(summary) {
       </div>
     </div>
   `;
+}
+
+function renderNotices(notices = []) {
+  if (!el.noticeList) return;
+  el.noticeList.innerHTML = notices.length ? notices.map((notice) => `
+    <article class="notice-row">
+      <div>
+        <strong>${esc(notice.title || "공지")}</strong>
+        <span>${formatTime(notice.updatedAt || notice.createdAt)} · 댓글 ${(notice.comments || []).length}개</span>
+        <p>${esc(notice.body || "")}</p>
+      </div>
+      <div class="row-actions">
+        <button class="ghost" type="button" data-notice-id="${esc(notice.id)}" data-notice-action="edit">수정</button>
+        <button class="danger" type="button" data-notice-id="${esc(notice.id)}" data-notice-action="delete">삭제</button>
+      </div>
+    </article>
+  `).join("") : emptyBlock("등록된 공지가 없습니다.");
+}
+
+async function saveNotice(event) {
+  event.preventDefault();
+  const noticeId = el.noticeId.value.trim();
+  const title = el.noticeTitle.value.trim();
+  const body = el.noticeBody.value.trim();
+  if (!title || !body) {
+    toast("공지 제목과 내용을 입력해 주세요.");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    await adminApi(noticeId ? `/api/admin/notices/${encodeURIComponent(noticeId)}` : "/api/admin/notices", {
+      method: noticeId ? "PATCH" : "POST",
+      body: { title, body }
+    });
+    resetNoticeForm();
+    await loadOverview();
+    toast(noticeId ? "공지를 수정했습니다." : "공지를 등록했습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function editNotice(noticeId) {
+  const notice = (state.overview?.notices || state.overview?.summary?.notices || []).find((item) => item.id === noticeId);
+  if (!notice) return;
+  el.noticeId.value = notice.id;
+  el.noticeTitle.value = notice.title || "";
+  el.noticeBody.value = notice.body || "";
+  el.cancelNoticeEdit.hidden = false;
+  el.noticeTitle.focus();
+}
+
+function resetNoticeForm() {
+  if (!el.noticeForm) return;
+  el.noticeForm.reset();
+  el.noticeId.value = "";
+  el.cancelNoticeEdit.hidden = true;
+}
+
+async function deleteNotice(noticeId) {
+  const notice = (state.overview?.notices || state.overview?.summary?.notices || []).find((item) => item.id === noticeId);
+  if (!notice) return;
+  if (!confirm(`공지 "${notice.title || "공지"}"를 삭제할까요? 본사이트에서도 사라집니다.`)) return;
+  setBusy(true);
+  try {
+    await adminApi(`/api/admin/notices/${encodeURIComponent(noticeId)}`, { method: "DELETE" });
+    resetNoticeForm();
+    await loadOverview();
+    toast("공지를 삭제했습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 function renderUser(user) {
@@ -367,7 +468,8 @@ async function sendReport() {
   setBusy(true);
   try {
     const result = await adminApi("/api/admin/reports/send", { method: "POST" });
-    toast(result.report?.email?.status === "sent" ? "리포트 이메일을 발송했습니다." : result.report?.email?.message || "리포트 기록을 생성했습니다.");
+    const email = result.report?.email || {};
+    toast(email.status === "sent" ? `회원 ${email.sentCount || 0}명에게 리포트를 발송했습니다.` : email.message || "리포트 기록을 생성했습니다.");
   } catch (error) {
     toast(error.message);
   } finally {
@@ -490,7 +592,7 @@ function emptyBlock(text) {
 
 function setBusy(value) {
   state.busy = Boolean(value);
-  document.querySelectorAll("button, input").forEach((item) => {
+  document.querySelectorAll("button, input, select, textarea").forEach((item) => {
     item.disabled = state.busy;
   });
 }
