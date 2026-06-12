@@ -59,11 +59,25 @@ function bindEvents() {
     const button = event.target.closest("[data-user-action]");
     if (!button) return;
     const action = button.dataset.userAction;
+    if (action === "update-limit") {
+      await updateUserLimit(button.dataset.userId);
+      return;
+    }
     if (action === "force-delete" || action === "permanent-delete") {
       await deleteUser(button.dataset.userId, action);
       return;
     }
     await updateUserApproval(button.dataset.userId, action);
+  });
+  el.userList.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-limit-select]");
+    if (!select) return;
+    const row = select.closest(".user-row");
+    const custom = row?.querySelector("[data-limit-custom]");
+    if (custom) {
+      custom.hidden = select.value !== "custom";
+      if (select.value !== "custom") custom.value = "";
+    }
   });
 }
 
@@ -165,6 +179,17 @@ function renderUser(user) {
             <span>누적 API: ${formatNumber(user.totalApiCalls || 0)}</span>
             <span>최근조회: ${formatTime(user.lastCheckedAt)}</span>
           </div>
+          <div class="limit-editor">
+            <label>
+              한도 변경
+              <select data-limit-select>
+                ${[100, 300, 500, 1000].map((limit) => `<option value="${limit}" ${Number(user.productLimit || 100) === limit ? "selected" : ""}>${limit}</option>`).join("")}
+                <option value="custom">직접입력</option>
+              </select>
+            </label>
+            <input data-limit-custom type="number" min="100" max="1000" step="1" placeholder="100~1000" hidden>
+            <button class="ghost" type="button" data-user-id="${esc(user.id)}" data-user-action="update-limit">한도 저장</button>
+          </div>
         </details>
       </div>
       <div class="user-meta">
@@ -255,6 +280,41 @@ async function updateUserApproval(userId, status) {
     });
     await loadOverview();
     toast(status === "approved" ? "승인했습니다." : status === "rejected" ? "거절했습니다." : "대기 상태로 변경했습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function updateUserLimit(userId) {
+  const user = (state.overview?.users || []).find((item) => item.id === userId);
+  if (!user) return;
+  const row = document.querySelector(`[data-user-id="${cssEscape(userId)}"][data-user-action="update-limit"]`)?.closest(".user-row");
+  const select = row?.querySelector("[data-limit-select]");
+  const custom = row?.querySelector("[data-limit-custom]");
+  const rawLimit = select?.value === "custom" ? custom?.value : select?.value;
+  const productLimit = Number(rawLimit || 0);
+  if (!Number.isInteger(productLimit) || productLimit < 100 || productLimit > 1000) {
+    toast("한도는 100~1000 사이 숫자로 입력해 주세요.");
+    return;
+  }
+
+  setBusy(true);
+  try {
+    await adminApi(`/api/admin/users/${encodeURIComponent(userId)}/settings`, {
+      method: "POST",
+      body: {
+        productLimit,
+        suspended: Boolean(user.restrictions?.suspended),
+        productCreateBlocked: Boolean(user.restrictions?.productCreateBlocked),
+        manualTrackBlocked: Boolean(user.restrictions?.manualTrackBlocked),
+        reason: user.restrictions?.reason || "",
+        approvalStatus: user.approvalStatus || "approved"
+      }
+    });
+    await loadOverview();
+    toast(`키워드 한도를 ${formatNumber(productLimit)}개로 변경했습니다.`);
   } catch (error) {
     toast(error.message);
   } finally {
@@ -463,4 +523,9 @@ function esc(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(value);
+  return String(value || "").replace(/["\\]/g, "\\$&");
 }
